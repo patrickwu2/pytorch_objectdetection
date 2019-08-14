@@ -9,8 +9,6 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 # albumentations
 from albumentations import (
-    HorizontalFlip,
-    VerticalFlip,
     Resize,
     Rotate,
     ToGray,
@@ -74,44 +72,51 @@ class CSVDataset(Dataset):
             category_id.append(cat_id)
 
         return bboxes, category_id
-
-BOX_COLOR = (255, 0, 0)
-TEXT_COLOR = (255, 255, 255)
-
-
-def visualize_bbox(img, bbox, class_id, class_idx_to_name, color=BOX_COLOR, thickness=2):
-    x_min, y_min, x_max, y_max = [int(x) for x in bbox]
-    cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color=color, thickness=thickness)
-    class_name = class_idx_to_name[class_id]
-    ((text_width, text_height), _) = cv2.getTextSize(class_name, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)    
-    cv2.rectangle(img, (x_min, y_min - int(1.3 * text_height)), (x_min + text_width, y_min), BOX_COLOR, -1)
-    cv2.putText(img, class_name, (x_min, y_min - int(0.3 * text_height)), cv2.FONT_HERSHEY_SIMPLEX, 0.35,TEXT_COLOR, lineType=cv2.LINE_AA)
-    return img
-
-
-def visualize(annotations, category_id_to_name, fname):
-    img = annotations['image'].copy()
-    for idx, bbox in enumerate(annotations['bboxes']):
-        img = visualize_bbox(img, bbox, annotations['category_id'][idx], category_id_to_name)
-    #plt.figure(figsize=(12, 12))
-    cv2.imwrite(fname, img)
+    def num_classes(self):
+        return max(self.classes.values()) + 1
 
 def customed_collate_fn(batch):
-
     def get_aug(aug, min_area=0., min_visibility=0.):
         return Compose(aug, bbox_params={'format': 'pascal_voc', 'min_area': min_area, 'min_visibility': min_visibility, 'label_fields': ['category_id']})       
 
-    aug = get_aug([Rotate(limit=20, p=0.3), ToGray(p=0.3), HueSaturationValue(20, 30, 20, p=0.2)])
+    '''
+    def find_new_size(img_size):
+        min_side = 608
+        max_side = 1024
+        rows, cols, cns = img_size
+        smallest_side = min(rows, cols)
+        # scale
+        scale = min_side / smallest_side
+
+        return (int(round(rows*scale)), int(round(cols*scale)))
+    '''
 
     def _transform_fn_(one_batch):
+        # augmentation
+        #w, h = find_new_size(one_batch['image'].shape)
+        aug = get_aug([Rotate(limit=20, p=0.3), ToGray(p=0.3), HueSaturationValue(20, 30, 20, p=0.2), Resize(896,736)])
         augmented = aug(**one_batch)
-        augmented['image'] = augmented['image'].astype(np.float32) / 255.0
-        augmented['image'] = torch.tensor(augmented['image']).type(torch.float32)
-        return augmented
-
-    category_id_to_name = {0:'signature', 1:'stamp', 2:'date'}
+        
+        new_one_batch = {}
+        # image
+        new_one_batch['image'] = augmented['image'].astype(np.float32) / 255.0
+        # annotation
+        new_one_batch['annot'] = []
+        for bbox, cat in zip(augmented['bboxes'], augmented['category_id']):
+            bbox = [int(x) for x in bbox]
+            anno = bbox + [cat]
+            new_one_batch['annot'].append(anno)
+        new_one_batch['annot'] = np.array(new_one_batch['annot'])
+        pad_num = 15 - new_one_batch['annot'].shape[0]
+        pad = np.ones((pad_num, 5)) * -1
+        new_one_batch['annot'] = np.concatenate([new_one_batch['annot'], pad], axis=0)
+        return new_one_batch
     batch = [_transform_fn_(one_batch) for one_batch in batch]
-    return batch
+    values = {}
+    values['img'] = torch.stack([torch.tensor(x['image']).type(torch.float32).permute(2, 0, 1) for x in batch], 0, out=None)
+    
+    values['annot'] = torch.stack([torch.tensor(x['annot']).type(torch.float32) for x in batch], 0, out=None)
+    return values
     #visualize(one_batch, category_id_to_name, 'original.png')
 
 if __name__ == "__main__":
