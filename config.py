@@ -7,7 +7,7 @@ train_config = {
 
     "mode": "train",
     "lr": 4e-5,
-    "batch_size": 8,
+    "batch_size": 1,
     "class_list":"/tmp2/patrickwu2/labeled_data/class_list.csv",
     "train_annotation":"/tmp2/patrickwu2/labeled_data/train_annotation.csv",
     "load_model_path": None,

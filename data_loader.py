@@ -32,8 +32,6 @@ class CSVDataset(Dataset):
         self.read_annotation(anno_file)
 
         self.image_names = list(self.image_data.keys())
-        import pickle
-        pickle.dump(self.image_data, open("image_data.pkl", "wb"))
 
     def read_annotation(self, anno_file):
         df = pd.read_csv(anno_file)
@@ -96,13 +94,20 @@ def customed_collate_fn(batch):
     def _transform_fn_(one_batch):
         # augmentation
         #w, h = find_new_size(one_batch['image'].shape)
-        aug = get_aug([Rotate(limit=20, p=0.3), ToGray(p=0.3), HueSaturationValue(20, 30, 20, p=0.2), Resize(896,736)])
+        aug = get_aug([Rotate(limit=20, p=0.3), ToGray(p=0.3), HueSaturationValue(20, 30, 20, p=0.2), Resize(1152,896)])
         augmented = aug(**one_batch)
         
         new_one_batch = {}
         # image
         new_one_batch['image'] = augmented['image'].astype(np.float32) / 255.0
         # annotation
+        '''
+        pad_num = 15 - len(augmented['bboxes'])
+        pad = np.ones((pad_num, 4)) * -1
+        new_one_batch['bbox'] = np.concatenate([augmented['bboxes'], pad], axis=0)
+        new_one_batch['cls'] = np.array(augmented['category_id']+[-1 for _ in range(pad_num)])
+        return new_one_batch
+        '''
         new_one_batch['annot'] = []
         for bbox, cat in zip(augmented['bboxes'], augmented['category_id']):
             bbox = [int(x) for x in bbox]
@@ -113,11 +118,14 @@ def customed_collate_fn(batch):
         pad = np.ones((pad_num, 5)) * -1
         new_one_batch['annot'] = np.concatenate([new_one_batch['annot'], pad], axis=0)
         return new_one_batch
+        
     batch = [_transform_fn_(one_batch) for one_batch in batch]
     values = {}
     values['img'] = torch.stack([torch.tensor(x['image']).type(torch.float32).permute(2, 0, 1) for x in batch], 0, out=None)
     
     values['annot'] = torch.stack([torch.tensor(x['annot']).type(torch.float32) for x in batch], 0, out=None)
+    #values['bbox'] = torch.stack([torch.tensor(x['bbox']).type(torch.float32) for x in batch], 0, out=None)
+    #values['cls'] = torch.stack([torch.tensor(x['cls']).type(torch.float32) for x in batch], 0, out=None)
     return values
     #visualize(one_batch, category_id_to_name, 'original.png')
 

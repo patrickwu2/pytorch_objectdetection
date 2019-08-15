@@ -13,6 +13,7 @@ from torchvision import transforms
 from base_agent import BaseAgent
 from data_loader import CSVDataset, customed_collate_fn
 import model
+from resnet import RetinaNet
 import csv_eval
 
 class RetinaNetAgent(BaseAgent):
@@ -21,6 +22,7 @@ class RetinaNetAgent(BaseAgent):
         # cuda / model setting
         self.use_cuda = True if len(self._config['device_ids']) >= 1 else False
         self.device_ids = self._config['device_ids']
+        #self.model = RetinaNet(num_classes=3)
         self.model = getattr(model, self._config['model_name']) \
                 (num_classes=3, pretrained=True)
         if self.use_cuda:
@@ -78,7 +80,7 @@ class RetinaNetAgent(BaseAgent):
     def train(self):
         print ('Start Training ...')
         # init log
-        self.test(validation=True)
+        #self.test(validation=True)
         self.epoch_loss = []
         start_epoch = 0 if self._epoch == 0 else self._epoch + 1
         for self._epoch in range(start_epoch, self._config['epoches']):
@@ -119,7 +121,7 @@ class RetinaNetAgent(BaseAgent):
         self.optimizer.step()
 
 
-    def feed_into_net(self, batch):
+    def feed_into_net(self, batch, train=True):
         # load into GPU
         if self.use_cuda: 
             for key in batch:
@@ -128,8 +130,17 @@ class RetinaNetAgent(BaseAgent):
         # process batch data
         img = batch['img']
         annot = batch['annot']
+        #cls_targets = batch['cls']
+        #loc_targets = batch['bbox']
+        #loc_preds, cls_preds = self.model(img)
+        #print (loc_pred.size(), cls_pred.size())
+        #from focal_loss import FocalLoss
+        #self.focal_loss = FocalLoss()
+        #loc_loss, cls_loss = self.focal_loss(loc_preds, loc_targets, cls_preds, cls_targets)
+        
         class_loss, reg_loss = self.model((img, annot))
         
+        #exit()
         # loss
         detailed_loss = {'class_loss':class_loss, 'reg_loss':reg_loss}
         loss = class_loss + reg_loss
