@@ -56,14 +56,14 @@ class RetinaNetAgent(BaseAgent):
             dataset_train = CSVDataset(self._config['train_annotation'], \
                                         self._config['class_list'])
             # dataloader
-            self.train_loader = DataLoader(dataset_train, num_workers=self._config['num_workers'], batch_size=self._config['batch_size'], shuffle=True, collate_fn=customed_collate_fn)
+            self.train_loader = DataLoader(dataset_train, num_workers=self._config['num_workers'], batch_size=self._config['batch_size'], shuffle=True, collate_fn=dataset_train.customed_collate_fn)
 
             # validation
             if self._config['validation'] is True:
                 self.dataset_test = CSVDataset(self._config['test_annotation'], \
-                                                self._config['class_list'])
+                                                self._config['class_list'], train=False)
                 # dataloader
-                self.test_loader = DataLoader(self.dataset_test, num_workers=self._config['num_workers'], batch_size=1, shuffle=False, collate_fn=customed_collate_fn)
+                self.test_loader = DataLoader(self.dataset_test, num_workers=self._config['num_workers'], batch_size=1, shuffle=False, collate_fn=self.dataset_test.customed_collate_fn)
             # file manager
             self.log_file = open("log.txt", "w")
             # train
@@ -73,8 +73,39 @@ class RetinaNetAgent(BaseAgent):
         tqdm_loader = tqdm(self.test_loader, total=len(self.test_loader))
         self.change_model_state('eval')
             
-        # array to save loss for testing data
         mAP = csv_eval.evaluate(self.dataset_test, self.test_loader, self.model, self.log_file)
+        return
+        # array to save loss for testing data
+        all_detections = [[None for i in range(3)]for j in range(len(self.test_loader))]
+        for step, batch in enumerate(tqdm_loader):
+            scores, labels, boxes = self.feed_into_net(batch, train=False)
+
+            scores = scores.cpu().data.numpy()
+            labels = labels.cpu().data.numpy()
+            boxes = boxes.cpu().data.numpy()
+
+            if validation is True:
+                anno = batch['annot']
+                indices = np.where(scores >= 0.00)[0]
+                if indices.shape[0] > 0:
+                    scores = scores[indices]
+
+                    scores_sort = np.argsort(-scores)[:100]
+
+                    image_boxes = boxes[indices[scores_sort], :]
+                    image_scores = scores[scores_sort]
+                    image_labels = labels[indices[scores_sort]]
+                    
+                    image_detections = np.concatenate([image_boxes, \
+                            image_scores.reshape(-1, 1), \
+                            image_labels.reshape(-1, 1)], axis=1)
+                    for label in range(3):
+                        all_detections[step][label] = image_detections[image_detections[:,-1] ==label, :-1]
+
+                    exit()
+            #mAP = csv_eval.evaluate(self.dataset_test, self.test_loader, self.model, self.log_file)
+
+
                 
 
     def train(self):
@@ -90,9 +121,10 @@ class RetinaNetAgent(BaseAgent):
             # save log
             # self.save_log(print_msg=True)
             # save model
-            if self._epoch > 5:
+            if self._epoch > -1:
                 self.test(validation=True)
-            torch.save(self.model, 'saved/retinanet_{}.pt'.format(self._epoch))
+            self.save_model()
+            #torch.save(self.model, 'saved/retinanet_{}.pt'.format(self._epoch))
             
     def train_one_epoch(self):
         tqdm_loader = tqdm(self.train_loader, total=len(self.train_loader))
@@ -128,8 +160,19 @@ class RetinaNetAgent(BaseAgent):
                 if isinstance(batch[key], torch.Tensor):
                     batch[key] = batch[key].to(self.device_ids[0])
         # process batch data
-        img = batch['img']
-        annot = batch['annot']
+        if train is True:
+            img = batch['img']
+            annot = batch['annot']
+            class_loss, reg_loss = self.model((img, annot))
+        
+            # loss
+            detailed_loss = {'class_loss':class_loss, 'reg_loss':reg_loss}
+            loss = class_loss + reg_loss
+            return loss, detailed_loss
+        
+        else:
+            img = batch['img']
+            return self.model(img)
         #cls_targets = batch['cls']
         #loc_targets = batch['bbox']
         #loc_preds, cls_preds = self.model(img)
@@ -138,14 +181,6 @@ class RetinaNetAgent(BaseAgent):
         #self.focal_loss = FocalLoss()
         #loc_loss, cls_loss = self.focal_loss(loc_preds, loc_targets, cls_preds, cls_targets)
         
-        class_loss, reg_loss = self.model((img, annot))
-        
-        #exit()
-        # loss
-        detailed_loss = {'class_loss':class_loss, 'reg_loss':reg_loss}
-        loss = class_loss + reg_loss
-        return loss, detailed_loss
-
     def change_model_state(self, state):
         if state == 'train':
             self.model.train()

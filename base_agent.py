@@ -42,7 +42,8 @@ class BaseAgent(object):
                       'model_state_dict': {k: v.cpu() for k, v in \
                                            self.model.state_dict().items()},
                       'opt_state_dict': self.optimizer.state_dict()}
-        self._file_manager.save_model(checkpoint)
+        #self._file_manager.save_model(checkpoint)
+        torch.save(checkpoint, f'saved/RetinaNet_epoch_{epoch}.pt')
     
     def load_model(self, load_model_path, param_only=False):
         checkpoint = self._file_manager.load_model(load_model_path)
