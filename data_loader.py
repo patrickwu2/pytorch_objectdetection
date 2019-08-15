@@ -32,6 +32,8 @@ class CSVDataset(Dataset):
         self.read_annotation(anno_file)
 
         self.image_names = list(self.image_data.keys())
+        import pickle
+        pickle.dump(self.image_data, open("image_data.pkl", "wb"))
 
     def read_annotation(self, anno_file):
         df = pd.read_csv(anno_file)
@@ -123,7 +125,7 @@ if __name__ == "__main__":
     train_annotation = '/tmp2/patrickwu2/labeled_data/train_annotation.csv'
     class_list = '/tmp2/patrickwu2/labeled_data/class_list.csv'
     dataset = CSVDataset(train_annotation, class_list)
-    
+    exit()
     loader = DataLoader(dataset, batch_size=4, collate_fn=customed_collate_fn)
     from tqdm import tqdm
     for batch in tqdm(loader):

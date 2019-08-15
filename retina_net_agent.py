@@ -1,6 +1,7 @@
 # built-in packages
+import numpy as np
 from tqdm import tqdm
-
+import collections
 # torch
 import torch
 import torch.optim as optim
@@ -21,7 +22,7 @@ class RetinaNetAgent(BaseAgent):
         self.use_cuda = True if len(self._config['device_ids']) >= 1 else False
         self.device_ids = self._config['device_ids']
         self.model = getattr(model, self._config['model_name']) \
-                (num_classes=10, pretrained=False)
+                (num_classes=3, pretrained=True)
         if self.use_cuda:
             self.model = self.model.to(self.device_ids[0])
         # optimizer / epoch
@@ -53,14 +54,14 @@ class RetinaNetAgent(BaseAgent):
             dataset_train = CSVDataset(self._config['train_annotation'], \
                                         self._config['class_list'])
             # dataloader
-            self.train_loader = DataLoader(dataset_train, num_workers=self._config['num_workers'], batch_size=2, shuffle=True, collate_fn=customed_collate_fn)
+            self.train_loader = DataLoader(dataset_train, num_workers=self._config['num_workers'], batch_size=self._config['batch_size'], shuffle=True, collate_fn=customed_collate_fn)
 
             # validation
             if self._config['validation'] is True:
                 self.dataset_test = CSVDataset(self._config['test_annotation'], \
                                                 self._config['class_list'])
                 # dataloader
-                self.test_loader = DataLoader(self.dataset_test, num_workers=self._config['num_workers'], batch_size=1, shuffle=False, collate_fn=collater)
+                self.test_loader = DataLoader(self.dataset_test, num_workers=self._config['num_workers'], batch_size=1, shuffle=False, collate_fn=customed_collate_fn)
             # file manager
             self.log_file = open("log.txt", "w")
             # train
@@ -71,12 +72,13 @@ class RetinaNetAgent(BaseAgent):
         self.change_model_state('eval')
             
         # array to save loss for testing data
-        mAP = csv_eval.evaluate(self.dataset_test, self.model, self.log_file)
+        mAP = csv_eval.evaluate(self.dataset_test, self.test_loader, self.model, self.log_file)
                 
 
     def train(self):
         print ('Start Training ...')
         # init log
+        self.test(validation=True)
         self.epoch_loss = []
         start_epoch = 0 if self._epoch == 0 else self._epoch + 1
         for self._epoch in range(start_epoch, self._config['epoches']):
@@ -88,18 +90,23 @@ class RetinaNetAgent(BaseAgent):
             # save model
             if self._epoch > 5:
                 self.test(validation=True)
-            torch.save(retinanet.module, 'saved/{}_retinanet_{}.pt'.format(parser.dataset, epoch_num))
+            torch.save(self.model, 'saved/retinanet_{}.pt'.format(self._epoch))
             
     def train_one_epoch(self):
         tqdm_loader = tqdm(self.train_loader, total=len(self.train_loader))
+        loss_hist = collections.deque(maxlen=500)
         self.change_model_state('train')
-        self.model.training = True
+        self.model.freeze_bn()
+        #self.model.training = True
         for step, batch in enumerate(tqdm_loader):
             loss, detailed_loss = self.feed_into_net(batch)
             self.update(loss)
             self.epoch_loss.append(loss.cpu().data.numpy()[0])
-            print_msg = f"""Epoch: {self._epoch} | Iteration: {step} | class loss : {detailed_loss['class_loss'].cpu().data.numpy()} | reg loss : {detailed_loss['reg_loss'].cpu().data.numpy()} | running loss : {loss.cpu().data.numpy()}"""
-            print (print_msg)
+            loss_hist.append(loss.cpu().data.numpy()[0])
+
+            regression_loss = detailed_loss['reg_loss'].cpu().data.numpy()[0]
+            classification_loss = detailed_loss['class_loss'].cpu().data.numpy()[0]
+            print('Epoch: {} | Iteration: {} | Classification loss: {:1.5f} | Regression loss: {:1.5f} | Running loss: {:1.5f}'.format(self._epoch, step, float(classification_loss), float(regression_loss), np.mean(loss_hist)))
             del loss
             del detailed_loss
 
